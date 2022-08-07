@@ -40,6 +40,7 @@ const (
 	Dis
 	Dot
 	List
+	Perf
 	Proto
 	Raw
 	Tags
@@ -103,6 +104,8 @@ func Generate(w io.Writer, rpt *Report, obj plugin.ObjTool) error {
 		return nil
 	case Tags:
 		return printTags(w, rpt)
+	case Perf:
+		return printPerf(w, rpt)
 	case Proto:
 		return printProto(w, rpt)
 	case TopProto:
@@ -291,6 +294,49 @@ func (rpt *Report) newGraph(nodes graph.NodeSet) *graph.Graph {
 	}
 
 	return graph.New(rpt.prof, gopt)
+}
+
+// printPerf prints all traces from a profile.
+func printPerf(w io.Writer, rpt *Report) error {
+	/*
+	   java  8192 [000]  0.0: cpu-clock:
+	   	7fa4b39f24f8 foo (/tmp/perf-4771.map)
+	   	7fa4b41035a4 main (/tmp/perf-4771.map)
+	*/
+
+	prof := rpt.prof
+
+	type event struct {
+		OffsetNanos int64
+		Sample      *profile.Sample
+	}
+
+	var events []event
+	for _, sample := range prof.Sample {
+		if len(sample.Location) == 0 {
+			continue
+		}
+
+		for _, offsetNanos := range sample.OffsetNanos {
+			events = append(events, event{OffsetNanos: offsetNanos, Sample: sample})
+		}
+	}
+
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].OffsetNanos < events[j].OffsetNanos
+	})
+
+	for _, e := range events {
+		fmt.Fprintf(w, "go 0 [000] %f: cpu-clock:\n", float64(e.OffsetNanos)/1e9)
+		for _, loc := range e.Sample.Location {
+			for _, line := range loc.Line {
+				fmt.Fprintf(w, "\t%016x %s (foo)\n", loc.Address, line.Function.Name)
+			}
+		}
+		fmt.Fprintln(w, "")
+	}
+
+	return nil
 }
 
 // printProto writes the incoming proto via thw writer w.

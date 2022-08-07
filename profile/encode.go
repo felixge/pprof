@@ -412,6 +412,7 @@ func (p *Sample) encode(b *buffer) {
 	for _, x := range p.labelX {
 		encodeMessage(b, 3, x)
 	}
+	encodeInt64s(b, 4, p.OffsetNanos)
 }
 
 var sampleDecoder = []decoder{
@@ -427,6 +428,8 @@ var sampleDecoder = []decoder{
 		s.labelX = append(s.labelX, label{})
 		return decodeMessage(b, &s.labelX[n])
 	},
+	// repeated int64 offset_nanos = 4
+	func(b *buffer, m message) error { return decodeInt64s(b, &m.(*Sample).OffsetNanos) },
 }
 
 func (p label) decoder() []decoder {
