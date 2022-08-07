@@ -71,11 +71,12 @@ type ValueType struct {
 
 // Sample corresponds to Profile.Sample
 type Sample struct {
-	Location []*Location
-	Value    []int64
-	Label    map[string][]string
-	NumLabel map[string][]int64
-	NumUnit  map[string][]string
+	Location    []*Location
+	Value       []int64
+	Label       map[string][]string
+	NumLabel    map[string][]int64
+	NumUnit     map[string][]string
+	OffsetNanos []int64
 
 	locationIDX []uint64
 	labelX      []label

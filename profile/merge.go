@@ -154,11 +154,12 @@ type mapInfo struct {
 
 func (pm *profileMerger) mapSample(src *Sample) *Sample {
 	s := &Sample{
-		Location: make([]*Location, len(src.Location)),
-		Value:    make([]int64, len(src.Value)),
-		Label:    make(map[string][]string, len(src.Label)),
-		NumLabel: make(map[string][]int64, len(src.NumLabel)),
-		NumUnit:  make(map[string][]string, len(src.NumLabel)),
+		Location:    make([]*Location, len(src.Location)),
+		Value:       make([]int64, len(src.Value)),
+		Label:       make(map[string][]string, len(src.Label)),
+		NumLabel:    make(map[string][]int64, len(src.NumLabel)),
+		NumUnit:     make(map[string][]string, len(src.NumLabel)),
+		OffsetNanos: make([]int64, len(src.OffsetNanos)),
 	}
 	for i, l := range src.Location {
 		s.Location[i] = pm.mapLocation(l)
@@ -185,9 +186,11 @@ func (pm *profileMerger) mapSample(src *Sample) *Sample {
 		for i, v := range src.Value {
 			ss.Value[i] += v
 		}
+		ss.OffsetNanos = append(ss.OffsetNanos, src.OffsetNanos...)
 		return ss
 	}
 	copy(s.Value, src.Value)
+	copy(s.OffsetNanos, src.OffsetNanos)
 	pm.samples[k] = s
 	pm.p.Sample = append(pm.p.Sample, s)
 	return s
