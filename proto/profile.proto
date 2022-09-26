@@ -89,6 +89,8 @@ message Profile {
   // Index into the string table of the type of the preferred sample
   // value. If unset, clients should default to the last sample value.
   int64 default_sample_type = 14;
+  // A common table to list information on threads 
+  repeated ThreadInfo thread_info = 15;
 }
 
 // ValueType describes the semantics and measurement units of a value.
@@ -133,6 +135,9 @@ message Breakdown {
   // recorded value. For cumulative sample types the sum of these values should
   // add up to the corresponding Sample.value.
   repeated int64 value = 2;
+  // A list of ThreadInfo ids into the common table
+  // Either empty or holds the same number of elements as Breakdown.time_offset_nanos
+  repeated int64 thread_infos = 3;
 }
 
 message Label {
@@ -227,4 +232,10 @@ message Function {
   int64 filename = 4; // Index into string table
   // Line number in source file.
   int64 start_line = 5;
+}
+
+message ThreadInfo {
+  int64 pid = 1;
+  int64 tid = 2;
+  repeated Label label = 3;
 }
