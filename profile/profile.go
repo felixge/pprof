@@ -35,10 +35,12 @@ import (
 type Profile struct {
 	SampleType        []*ValueType
 	DefaultSampleType string
+	TickUnit          string
 	Sample            []*Sample
 	Mapping           []*Mapping
 	Location          []*Location
 	Function          []*Function
+	LabelSet          []*LabelSet
 	Comments          []string
 
 	DropFrames string
@@ -58,6 +60,7 @@ type Profile struct {
 	keepFramesX        int64
 	stringTable        []string
 	defaultSampleTypeX int64
+	tickUnitX          int64
 }
 
 // ValueType corresponds to Profile.ValueType
@@ -71,14 +74,23 @@ type ValueType struct {
 
 // Sample corresponds to Profile.Sample
 type Sample struct {
-	Location []*Location
-	Value    []int64
-	Label    map[string][]string
-	NumLabel map[string][]int64
-	NumUnit  map[string][]string
+	Location  []*Location
+	Value     []int64
+	Label     map[string][]string
+	NumLabel  map[string][]int64
+	NumUnit   map[string][]string
+	Breakdown []Breakdown
 
 	locationIDX []uint64
 	labelX      []label
+}
+
+type Breakdown struct {
+	Tick     []int64
+	Value    []int64
+	LabelSet []*LabelSet // warning: values can be nil when there are no labels for the tick
+
+	labelSetIDX []uint64
 }
 
 // label corresponds to Profile.Label
@@ -89,6 +101,15 @@ type label struct {
 	numX int64 // Integer value for this label
 	// can be set if numX has value
 	unitX int64
+}
+
+type LabelSet struct {
+	ID       uint64
+	Label    map[string][]string
+	NumLabel map[string][]int64
+	NumUnit  map[string][]string
+
+	labelX []label
 }
 
 // Mapping corresponds to Profile.Mapping

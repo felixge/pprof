@@ -81,6 +81,62 @@ func (p *Profile) preEncode() {
 		for i, loc := range s.Location {
 			s.locationIDX[i] = loc.ID
 		}
+
+		for i := range s.Breakdown {
+			b := &s.Breakdown[i]
+			b.labelSetIDX = make([]uint64, len(b.LabelSet))
+			for i, ls := range b.LabelSet {
+				if ls != nil {
+					// ls is nil if there is no label set for this tick, in this case the
+					// implicit b.labelSetIDX[i] = 0 value is what we want
+					b.labelSetIDX[i] = ls.ID
+				}
+			}
+		}
+	}
+
+	// TODO(fg) fix copy & paste from above
+	for _, l := range p.LabelSet {
+		l.labelX = nil
+		var keys []string
+		for k := range l.Label {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			vs := l.Label[k]
+			for _, v := range vs {
+				l.labelX = append(l.labelX,
+					label{
+						keyX: addString(strings, k),
+						strX: addString(strings, v),
+					},
+				)
+			}
+		}
+		var numKeys []string
+		for k := range l.NumLabel {
+			numKeys = append(numKeys, k)
+		}
+		sort.Strings(numKeys)
+		for _, k := range numKeys {
+			keyX := addString(strings, k)
+			vs := l.NumLabel[k]
+			units := l.NumUnit[k]
+			for i, v := range vs {
+				var unitX int64
+				if len(units) != 0 {
+					unitX = addString(strings, units[i])
+				}
+				l.labelX = append(l.labelX,
+					label{
+						keyX:  keyX,
+						numX:  v,
+						unitX: unitX,
+					},
+				)
+			}
+		}
 	}
 
 	for _, m := range p.Mapping {
@@ -122,6 +178,7 @@ func (p *Profile) preEncode() {
 	}
 
 	p.defaultSampleTypeX = addString(strings, p.DefaultSampleType)
+	p.tickUnitX = addString(strings, p.TickUnit)
 
 	p.stringTable = make([]string, len(strings))
 	for s, i := range strings {
@@ -156,6 +213,10 @@ func (p *Profile) encode(b *buffer) {
 	encodeInt64Opt(b, 12, p.Period)
 	encodeInt64s(b, 13, p.commentX)
 	encodeInt64(b, 14, p.defaultSampleTypeX)
+	encodeInt64(b, 15, p.tickUnitX)
+	for _, x := range p.LabelSet {
+		encodeMessage(b, 16, x)
+	}
 }
 
 var profileDecoder = []decoder{
@@ -236,6 +297,15 @@ var profileDecoder = []decoder{
 	func(b *buffer, m message) error { return decodeInt64s(b, &m.(*Profile).commentX) },
 	// int64 defaultSampleType = 14
 	func(b *buffer, m message) error { return decodeInt64(b, &m.(*Profile).defaultSampleTypeX) },
+	// int64 tick_unit = 15
+	func(b *buffer, m message) error { return decodeInt64(b, &m.(*Profile).tickUnitX) },
+	// repeated LabelSet label_set = 16
+	func(b *buffer, m message) error {
+		x := new(LabelSet)
+		pp := m.(*Profile)
+		pp.LabelSet = append(pp.LabelSet, x)
+		return decodeMessage(b, x)
+	},
 }
 
 // postDecode takes the unexported fields populated by decode (with
@@ -302,6 +372,16 @@ func (p *Profile) postDecode() error {
 		}
 	}
 
+	labelSets := make(map[uint64]*LabelSet, len(p.LabelSet))
+	labelSetIds := make([]*LabelSet, len(p.LabelSet)+1)
+	for _, l := range p.LabelSet {
+		if l.ID < uint64(len(labelSetIds)) {
+			labelSetIds[l.ID] = l
+		} else {
+			labelSets[l.ID] = l
+		}
+	}
+
 	for _, st := range p.SampleType {
 		st.Type, err = getString(p.stringTable, &st.typeX, err)
 		st.Unit, err = getString(p.stringTable, &st.unitX, err)
@@ -350,6 +430,56 @@ func (p *Profile) postDecode() error {
 			}
 		}
 		s.locationIDX = nil
+
+		for i := range s.Breakdown {
+			b := &s.Breakdown[i]
+			b.LabelSet = make([]*LabelSet, len(b.labelSetIDX))
+			for i, lid := range b.labelSetIDX {
+				if lid < uint64(len(labelSetIds)) {
+					b.LabelSet[i] = labelSetIds[lid]
+				} else {
+					b.LabelSet[i] = labelSets[lid]
+				}
+			}
+			b.labelSetIDX = nil
+		}
+	}
+
+	// TODO(fg) fix copy & paste from above
+	for _, l := range p.LabelSet {
+		labels := make(map[string][]string, len(l.labelX))
+		numLabels := make(map[string][]int64, len(l.labelX))
+		numUnits := make(map[string][]string, len(l.labelX))
+		for _, l := range l.labelX {
+			var key, value string
+			key, err = getString(p.stringTable, &l.keyX, err)
+			if l.strX != 0 {
+				value, err = getString(p.stringTable, &l.strX, err)
+				labels[key] = append(labels[key], value)
+			} else if l.numX != 0 || l.unitX != 0 {
+				numValues := numLabels[key]
+				units := numUnits[key]
+				if l.unitX != 0 {
+					var unit string
+					unit, err = getString(p.stringTable, &l.unitX, err)
+					units = padStringArray(units, len(numValues))
+					numUnits[key] = append(units, unit)
+				}
+				numLabels[key] = append(numLabels[key], l.numX)
+			}
+		}
+		if len(labels) > 0 {
+			l.Label = labels
+		}
+		if len(numLabels) > 0 {
+			l.NumLabel = numLabels
+			for key, units := range numUnits {
+				if len(units) > 0 {
+					numUnits[key] = padStringArray(units, len(numLabels[key]))
+				}
+			}
+			l.NumUnit = numUnits
+		}
 	}
 
 	p.DropFrames, err = getString(p.stringTable, &p.dropFramesX, err)
@@ -372,6 +502,7 @@ func (p *Profile) postDecode() error {
 
 	p.commentX = nil
 	p.DefaultSampleType, err = getString(p.stringTable, &p.defaultSampleTypeX, err)
+	p.TickUnit, err = getString(p.stringTable, &p.tickUnitX, err)
 	p.stringTable = nil
 	return err
 }
@@ -412,6 +543,9 @@ func (p *Sample) encode(b *buffer) {
 	for _, x := range p.labelX {
 		encodeMessage(b, 3, x)
 	}
+	for i := range p.Breakdown {
+		encodeMessage(b, 4, &p.Breakdown[i])
+	}
 }
 
 var sampleDecoder = []decoder{
@@ -426,6 +560,13 @@ var sampleDecoder = []decoder{
 		n := len(s.labelX)
 		s.labelX = append(s.labelX, label{})
 		return decodeMessage(b, &s.labelX[n])
+	},
+	// repeated uint64 label_set_id = 3
+	func(b *buffer, m message) error {
+		s := m.(*Sample)
+		n := len(s.Breakdown)
+		s.Breakdown = append(s.Breakdown, Breakdown{})
+		return decodeMessage(b, &s.Breakdown[n])
 	},
 }
 
@@ -450,6 +591,26 @@ var labelDecoder = []decoder{
 	func(b *buffer, m message) error { return decodeInt64(b, &m.(*label).numX) },
 	// optional int64 num = 4
 	func(b *buffer, m message) error { return decodeInt64(b, &m.(*label).unitX) },
+}
+
+func (p *Breakdown) decoder() []decoder {
+	return breakdownDecoder
+}
+
+func (p *Breakdown) encode(b *buffer) {
+	encodeInt64s(b, 1, p.Tick)
+	encodeInt64s(b, 2, p.Value)
+	encodeUint64s(b, 3, p.labelSetIDX)
+}
+
+var breakdownDecoder = []decoder{
+	nil, // 0
+	// repeated int64 ticks = 1
+	func(b *buffer, m message) error { return decodeInt64s(b, &m.(*Breakdown).Tick) },
+	// repeated int64 value = 2
+	func(b *buffer, m message) error { return decodeInt64s(b, &m.(*Breakdown).Value) },
+	// repeated uint64 label_set_id = 3
+	func(b *buffer, m message) error { return decodeUint64s(b, &m.(*Breakdown).labelSetIDX) },
 }
 
 func (p *Mapping) decoder() []decoder {
@@ -552,6 +713,30 @@ var functionDecoder = []decoder{
 	func(b *buffer, m message) error { return decodeInt64(b, &m.(*Function).filenameX) },
 	// optional int64 start_line = 5
 	func(b *buffer, m message) error { return decodeInt64(b, &m.(*Function).StartLine) },
+}
+
+func (p *LabelSet) decoder() []decoder {
+	return labelSetDecoder
+}
+
+func (p *LabelSet) encode(b *buffer) {
+	encodeUint64Opt(b, 1, p.ID)
+	for _, x := range p.labelX {
+		encodeMessage(b, 2, x)
+	}
+}
+
+var labelSetDecoder = []decoder{
+	nil, // 0
+	// optional uint64 id = 1
+	func(b *buffer, m message) error { return decodeUint64(b, &m.(*LabelSet).ID) },
+	// repeated Label label = 2
+	func(b *buffer, m message) error {
+		l := m.(*LabelSet)
+		n := len(l.labelX)
+		l.labelX = append(l.labelX, label{})
+		return decodeMessage(b, &l.labelX[n])
+	},
 }
 
 func addString(strings map[string]int, s string) int64 {
